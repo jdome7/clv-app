@@ -8,7 +8,7 @@ from streamlit_agraph import agraph, Node, Edge, Config
 
 @st.cache_resource
 def get_connection():
-    return sqlite3.connect('clv_app.db', check_same_thread=False)
+    return sqlite3.connect('deploy_clv.db', check_same_thread=False)
 
 
 conn = get_connection()
