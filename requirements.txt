@@ -4,5 +4,4 @@ matplotlib
 plotly
 scikit-learn
 streamlit-agraph
-sqlite3
 streamlit
