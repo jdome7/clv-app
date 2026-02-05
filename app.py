@@ -8,7 +8,7 @@ from streamlit_agraph import agraph, Node, Edge, Config
 
 @st.cache_resource
 def get_connection():
-    return sqlite3.connect('deploy_clv.db', check_same_thread=False)
+    return sqlite3.connect('clv_app.db', check_same_thread=False)
 
 
 conn = get_connection()
@@ -372,7 +372,7 @@ def methodology_tab():
     st.write("""
     The data used in this project was sourced from a UK-based company that sells giftware online, 
     with a customer base of mainly wholesalers. The dataset is made up of all of the transactions 
-    made between 01/12/2009 and 09/12/2011, with 1,067,371 rows of data containing information 
+    made between 01/12/2009 and 9/12/2011, with 1,067,371 rows of data containing information 
     such as the customer ID, invoice date, product ID, quantity purchased, and more. 
     
     The full dataset can be found at: https://archive.ics.uci.edu/dataset/502/online+retail+ii
