@@ -2,4 +2,10 @@ venv/
 __pycache__/
 *.csv
 *.db
-*.sqlite3
+*.
+backend/
+blah.ipynb
+*.html
+balls.py
+lib/
+data/
