@@ -275,6 +275,7 @@ def customer_tab(selected_id):
 
         left_col, right_col = st.columns([2, 1])
         with left_col:
+            #add a key, edge thickness, node size
             st.subheader("Purchase Network")
             show_agraph_network(selected_id, conn)
     
@@ -310,11 +311,14 @@ def customer_tab(selected_id):
         
         st.divider()
 
-        st.subheader("Transaction History")
+        st.subheader("Transaction History (Last 6 Months)")
 
         history = pd.read_sql(f"SELECT InvoiceDate, Description, Quantity, Price, Revenue FROM transactions WHERE customer_id = {selected_id} ORDER BY InvoiceDate DESC", conn)
-        st.dataframe(history, use_container_width=True)
-        st.write("**Since 12/1/2009*")
+        
+        if (history.empty):
+            st.write("No transactions were made in the last 6 months.")
+        else:
+            st.dataframe(history, use_container_width=True)
 
 
 def business_tab():
