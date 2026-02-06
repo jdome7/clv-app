@@ -10,3 +10,7 @@ lib/
 data/
 clv_app.db
 slim.py
+pp.py
+toparquet.py
+deploy_clv.db
+embeddings.py

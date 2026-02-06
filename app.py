@@ -1,23 +1,14 @@
 import streamlit as st
-import pandas as pd
-import sqlite3
 import plotly.express as px
-from sklearn.manifold import TSNE
-from sklearn.preprocessing import StandardScaler
+import duckdb
 from streamlit_agraph import agraph, Node, Edge, Config
 
-@st.cache_resource
-def get_connection():
-    return sqlite3.connect('clv_app.db', check_same_thread=False)
-
-
-conn = get_connection()
-
 @st.cache_data
-def get_all_ids(_conn):
-    return pd.read_sql("SELECT customer_id FROM customer_profiles ORDER BY customer_id", _conn)['customer_id'].tolist()
+def get_all_ids():
+    return duckdb.query("SELECT customer_id FROM 'customer_profiles.parquet' ORDER BY customer_id").df()['customer_id'].tolist()
 
-all_ids = get_all_ids(conn)
+
+all_ids = get_all_ids()
 
 if "selected_customer_id" not in st.session_state:
     st.session_state.selected_customer_id = all_ids[0] # Default to the first customer
@@ -36,26 +27,28 @@ selected_id = st.selectbox(
 
 selected_id = st.session_state.selected_customer_id
 
-def get_structural_twins(customer_id, sim_index, conn, n=3):
+
+def get_structural_twins(customer_id, sim_index, n=3):
     query = f"""
     SELECT customer_id, behavioral_similarity_index, clv, expected_monetary_value_segment
-    FROM customer_profiles 
+    FROM 'customer_profiles.parquet' 
     WHERE customer_id != {customer_id}
     ORDER BY ABS(behavioral_similarity_index - {sim_index}) ASC
     LIMIT {n}
     """
-    return pd.read_sql(query, conn)
+    return duckdb.query(query).df()
 
-
-def show_agraph_network(customer_id, conn):
+def show_agraph_network(customer_id):
 \
+
     query = f"""
     SELECT DISTINCT e.*, p.Description, p.pagerank_norm, e.total_spent, e.last_purchase_date
-    FROM customer_edges e
-    JOIN products p ON e.StockCode = p.StockCode
+    FROM 'customer_edges.parquet' e
+    JOIN 'products.parquet' p ON e.StockCode = p.StockCode
     WHERE e.customer_id = {customer_id}
     """
-    edges_df = pd.read_sql(query, conn)
+
+    edges_df = duckdb.query(query).df()
     
     nodes = []
     edges = []
@@ -63,9 +56,9 @@ def show_agraph_network(customer_id, conn):
  
     nodes.append(Node(id=str(customer_id), 
                       label=f"Customer {customer_id}", 
-                      font={'color': "#FFFFFF"},
+                      font={'color': "#FFFFFF",'strokeWidth': 4,'strokeColor': "#000000"},
                       size=30, 
-                      color="#25347A", 
+                      color="#10498A", 
                       shape="circle"))
     
  
@@ -73,30 +66,39 @@ def show_agraph_network(customer_id, conn):
 
         clean_desc = str(row['Description']).strip()
 
-        pr_val = row['pagerank_norm'].iloc[0]
+
+        pr_val = row['pagerank_norm']
         
         node_size = 15 + (pr_val * 25)
 
         product_id = row['StockCode']
 
-        total_spent = str(row['total_spent'].iloc[0]).strip()
-        last_purchase_date = str(row['last_purchase_date'].iloc[0]).strip()
+        total_spent = str(row['total_spent']).strip()
+        last_purchase_date = str(row['last_purchase_date']).strip()
         purchase_count = str(row['purchase_count']).strip()
 
         
         nodes.append(Node(id=row['StockCode'], 
                           label=product_id,
-                          font={'color': "#FFFFFF"},
+                          font={'color': "#FFFFFF",'strokeWidth': 4,'strokeColor': "#000000"},
                           title=f"Item: {clean_desc}\nPurchase Count: {purchase_count}\nTotal Spent: ${total_spent}\nLast Purchase Date: {last_purchase_date}",
                           size=node_size, 
-                          color="#1C83E1",
-                          shape="circle"))
+                          color="#4274AA",
+                          shape="dot"))
         
 
         edges.append(Edge(source=str(customer_id), 
                           target=row['StockCode'], 
                           color="#CFE7F0",
-                          width=int(row['purchase_count'])))
+                          width=int(row['purchase_count']),
+                          shadow={
+                            'enabled': True,
+                            'color': 'rgba(0,0,0,0.5)', 
+                            'size': 10,                
+                            'x': 0,                   
+                            'y': 0
+                          }
+                         ))
 
     config = Config(
             width='100%', 
@@ -117,57 +119,42 @@ def show_agraph_network(customer_id, conn):
     return agraph(nodes=nodes, edges=edges, config=config)
 
 
-
-def get_recommendations(customer_id, conn):
+def get_recommendations(customer_id):
     query = f"""
-    WITH MyProducts AS (
-        SELECT StockCode FROM customer_edges WHERE customer_id = {customer_id}
-    ),
-    Neighbors AS (
-        SELECT DISTINCT e2.customer_id
-        FROM customer_edges e2
-        JOIN MyProducts mp ON e2.StockCode = mp.StockCode
-        WHERE e2.customer_id != {customer_id}
-        LIMIT 1500 -- Optimization: We only need a sample of similar people to get great results
+    SELECT 
+        p.Description, 
+        COUNT(*) as link_strength
+    FROM 'customer_edges.parquet' e_neighbors
+    JOIN 'products.parquet' p ON e_neighbors.StockCode = p.StockCode
+    WHERE e_neighbors.customer_id IN (
+        -- Subquery: Find neighbors who bought at least one item in common
+        SELECT DISTINCT customer_id 
+        FROM 'customer_edges.parquet' 
+        WHERE StockCode IN (SELECT StockCode FROM 'customer_edges.parquet' WHERE customer_id = '{customer_id}')
+        AND customer_id != '{customer_id}'
     )
-    SELECT p.Description, COUNT(e3.customer_id) as link_strength
-    FROM customer_edges e3
-    JOIN Neighbors n ON e3.customer_id = n.customer_id
-    JOIN products p ON e3.StockCode = p.StockCode
-    WHERE e3.StockCode NOT IN (SELECT StockCode FROM MyProducts)
+    AND e_neighbors.StockCode NOT IN (
+        -- Exclude items the current customer already owns
+        SELECT StockCode FROM 'customer_edges.parquet' WHERE customer_id = '{customer_id}'
+    )
     GROUP BY p.Description
     ORDER BY link_strength DESC
     LIMIT 3
     """
-    return pd.read_sql(query, conn)
+    return duckdb.query(query).to_df()
 
 
-def behavioral_galaxy_3d(conn, min_p=0.0, max_p=1.0):
+    
+def behavioral_galaxy_3d(min_p=0.0, max_p=1.0):
+
     query = f"""
     SELECT *
-    FROM customer_profiles
+    FROM 'customer_profiles.parquet'
     WHERE probability_alive BETWEEN {min_p} AND {max_p}
     """
-    summary = pd.read_sql(query, conn)
 
-    features = ['clv', 'probability_alive', 'pagerank', 'centrality', 
-                'unique_products', 'behavioral_similarity_index', 'product_concentration']
+    summary = duckdb.query(query).df()
 
-    X_subset = summary[features].fillna(0)
-
- 
-    X_scaled = StandardScaler().fit_transform(X_subset)
-
-    tsne_3d = TSNE(n_components=3, perplexity=30, random_state=42)
-    coords_3d = tsne_3d.fit_transform(X_scaled)
-
-
-    summary['x_3d'] = coords_3d[:, 0]
-    summary['y_3d'] = coords_3d[:, 1]
-    summary['z_3d'] = coords_3d[:, 2]
-
-    st.subheader("Customer Embeddings")
-    st.caption("A 3D projection of customer behavior. Each dot is a customer; proximity represents behavioral similarity.")
 
     df_3d = summary.copy()
 
@@ -202,13 +189,12 @@ def behavioral_galaxy_3d(conn, min_p=0.0, max_p=1.0):
 
 
 
-
-def plot_pareto_curve(conn):
+def plot_pareto_curve():
     st.subheader("% of Total Revenue vs. % of Customer Base")
     
 
-    pareto_df = pd.read_sql("SELECT * FROM pareto_curve", conn)
-    
+    pareto_df = duckdb.query("SELECT * FROM 'pareto_curve.parquet'").df()
+        
     fig = px.line(
         pareto_df, 
         x='perc_customers', 
@@ -228,31 +214,29 @@ def plot_pareto_curve(conn):
     fig.update_layout(hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
-def feature_importance(conn):
-    st.subheader("📊 Feature Importance")
-    fi_df = pd.read_sql("SELECT * FROM importance_df", conn)
-    #st.write(fi_df)
-    st.dataframe(fi_df, use_container_width=True)
+# def feature_importance(conn):
+#     st.subheader("📊 Feature Importance")
+#     fi_df = pd.read_sql("SELECT * FROM importance_df", conn)
+#     #st.write(fi_df)
+#     st.dataframe(fi_df, use_container_width=True)
 
-def model_performance(conn):
-    st.subheader("Model Perfromance")
-    mi_df = pd.read_sql("SELECT * FROM model_performance", conn)
+
+def model_performance():
+    st.subheader("Model Performance")
+    mi_df = duckdb.query("SELECT * FROM 'model_performance.parquet'").df()
     #st.write(mi_df)
     st.dataframe(mi_df, use_container_width=True)
 
 def customer_tab(selected_id):
-    conn = get_connection()
-    st.header("👤 Customer Profile")
+    st.header("Customer Profile")
     
 
     # Add a sort option, add last purchase date, add links to similar customers
 
 
     if selected_id:
-        profile = pd.read_sql(f"SELECT * FROM customer_profiles WHERE customer_id = {selected_id}", conn).iloc[0]
-        g_stats = pd.read_sql("SELECT * FROM global_stats", conn).iloc[0]
-        
-        #Predicted at top
+        profile = duckdb.query(f"SELECT * FROM 'customer_profiles.parquet' WHERE customer_id = {selected_id}").df().iloc[0]
+
         clv_delta = profile['clv'] - profile['clv_last_6_months']
 
         # 2. Format the string for the label
@@ -277,28 +261,27 @@ def customer_tab(selected_id):
         with left_col:
             #add a key, edge thickness, node size
             st.subheader("Purchase Network")
-            show_agraph_network(selected_id, conn)
+            show_agraph_network(selected_id)
     
         #hover question marks things
         with right_col:
             st.subheader("Similar Customers")
-            twins = get_structural_twins(selected_id, profile['behavioral_similarity_index'], conn)
+            twins = get_structural_twins(selected_id, profile['behavioral_similarity_index'])
             
-            # for _, twin in twins.iterrows():
-            #     st.info(f"ID: {int(twin['customer_id'])} | CLV: ${twin['clv']:,.0f}")
+            
             for _, twin in twins.iterrows():
                 twin_id = int(twin['customer_id'])
                 
                 # Create a button for each twin
-                if st.button(f"Customer {twin_id} | CLV: ${twin['clv']:,.0f}", key=f"btn_{twin_id}"):
+                if st.button(f"Customer {twin_id} | Pred. Value: ${twin['clv']:,.0f}", key=f"btn_{twin_id}"):
                     st.session_state.selected_customer_id = twin_id
                     st.rerun() # This force-refreshes the app to the new ID's profile
 
             st.subheader("Recommended Products")
-            recs = get_recommendations(selected_id, conn)
+            recs = get_recommendations(selected_id)
             if not recs.empty:
                 for i, row in recs.iterrows():
-                    st.success(f"{row['Description']}")
+                    st.info(f"{row['Description']}")
             
             
         st.divider()
@@ -313,24 +296,33 @@ def customer_tab(selected_id):
 
         st.subheader("Transaction History (Last 6 Months)")
 
-        history = pd.read_sql(f"SELECT InvoiceDate, Description, Quantity, Price, Revenue FROM transactions WHERE customer_id = {selected_id} ORDER BY InvoiceDate DESC", conn)
-        
+        query = f"""
+            SELECT InvoiceDate, Description, Quantity, Price, Revenue 
+            FROM 'transactions.parquet' 
+            WHERE customer_id = {selected_id} 
+            ORDER BY InvoiceDate DESC
+        """
+
+        history = duckdb.query(query).to_df()
+
         if (history.empty):
             st.write("No transactions were made in the last 6 months.")
         else:
             st.dataframe(history, use_container_width=True)
 
 
+
 def business_tab():
 
-    conn = get_connection()
+
     st.header("Business Overview")
 
 
-    g_stats = pd.read_sql("SELECT * FROM global_stats", conn).iloc[0]
-    total_customers = pd.read_sql("SELECT COUNT(*) as total_customers FROM customer_profiles", conn).iloc[0]['total_customers']
-    total_revenue = pd.read_sql("SELECT SUM(clv) as total_revenue FROM customer_profiles", conn).iloc[0]['total_revenue']
-    
+    g_stats = duckdb.query("SELECT * FROM 'global_stats.parquet'").df().iloc[0]
+    total_customers = duckdb.query("SELECT COUNT(*) as total_customers FROM 'customer_profiles.parquet'").df().iloc[0]['total_customers']
+    total_revenue = duckdb.query("SELECT SUM(clv) as total_revenue FROM 'customer_profiles.parquet'").df().iloc[0]['total_revenue']
+
+
     main_left, main_right = st.columns([1, 2])
 
     with main_left:
@@ -341,35 +333,32 @@ def business_tab():
         st.metric("Average Probability Alive", f"{g_stats['avg_prob_alive']:.2%}")
 
     with main_right:
-        plot_pareto_curve(conn)
+        plot_pareto_curve()
 
     st.divider()
 
+    st.subheader("Customer Embeddings")
+    st.caption("A 3D projection of customer behavior. Each dot is a customer; proximity represents behavioral similarity.")
 
-    # st.sidebar.header("Galaxy Filters")
-    # p_range = st.sidebar.slider(
-    #     "Select P(Alive) Range",
-    #     0.0, 1.0, (0.0, 1.0), 0.05
-    # )
 
-    # metrics_query = f"SELECT COUNT(*) as count, SUM(clv) as val FROM customer_profiles WHERE probability_alive BETWEEN {p_range[0]} AND {p_range[1]}"
-    # stats = pd.read_sql(metrics_query, conn).iloc[0]
+
+    p_range = st.slider(
+        "Select P(Alive) Range",
+        0.0, 1.0, (0.0, 1.0), 0.05
+    )
+
+    metrics_query = f"SELECT COUNT(*) as count, SUM(clv) as val FROM 'customer_profiles.parquet' WHERE probability_alive BETWEEN {p_range[0]} AND {p_range[1]}"
+    stats = duckdb.query(metrics_query).to_df().iloc[0]
     
-    # col1, col2 = st.columns(2)
-    # col1.metric("Selected Customer Count", f"{int(stats['count'])}")
-    # col2.metric("Filtered CLV Pool", f"${stats['val']:,.0f}")
+    col1, col2 = st.columns(2)
+    col1.metric("Selected Customer Count", f"{int(stats['count'])}")
+    col2.metric("Filtered Revenue Pool", f"${stats['val']:,.0f}")
 
-    # 2. The Filtered 3D Galaxy
-    # behavioral_galaxy_3d(conn, min_p=p_range[0], max_p=p_range[1])
-    # with st.expander("View Customer Embeddings"):
-    #     #add loading
-
-    #     st.container(behavioral_galaxy_3d(conn,0,1))
-    
+    behavioral_galaxy_3d(min_p=p_range[0], max_p=p_range[1])
+ 
 
 
 def methodology_tab():
-    conn = get_connection()
     st.header("Methodology")
 
     st.subheader("Data Source")
@@ -452,7 +441,7 @@ def methodology_tab():
     the holdout period. The XGBoost model outperformed the probabilistic model in every metric I observed, 
     both on an aggregate and individual level as displayed in the table below.
     """)
-    model_performance(conn)
+    model_performance()
 
     st.subheader("Lessons")
     st.write("""
