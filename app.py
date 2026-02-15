@@ -296,7 +296,7 @@ def customer_tab(selected_id):
         
         st.divider()
 
-        st.subheader("Transaction History")
+        st.subheader("Full Transaction History")
 
         query = f"""
             SELECT InvoiceDate, Description, Quantity, Price, Revenue 
