@@ -14,3 +14,5 @@ pp.py
 toparquet.py
 deploy_clv.db
 embeddings.py
+transactions2.parquet
+transactions3.parquet

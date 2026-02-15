@@ -3,6 +3,7 @@ import plotly.express as px
 import duckdb
 from streamlit_agraph import agraph, Node, Edge, Config
 
+
 @st.cache_data
 def get_all_ids():
     return duckdb.query("SELECT customer_id FROM 'customer_profiles.parquet' ORDER BY customer_id").df()['customer_id'].tolist()
@@ -11,7 +12,7 @@ def get_all_ids():
 all_ids = get_all_ids()
 
 if "selected_customer_id" not in st.session_state:
-    st.session_state.selected_customer_id = all_ids[0] # Default to the first customer
+    st.session_state.selected_customer_id = all_ids[0] 
 
 def on_change_callback():
     st.session_state.selected_customer_id = st.session_state.customer_selector
@@ -58,7 +59,7 @@ def show_agraph_network(customer_id):
                       label=f"Customer {customer_id}", 
                       font={'color': "#FFFFFF",'strokeWidth': 4,'strokeColor': "#000000"},
                       size=30, 
-                      color="#10498A", 
+                      color="#064B9B", 
                       shape="circle"))
     
  
@@ -83,7 +84,7 @@ def show_agraph_network(customer_id):
                           font={'color': "#FFFFFF",'strokeWidth': 4,'strokeColor': "#000000"},
                           title=f"Item: {clean_desc}\nPurchase Count: {purchase_count}\nTotal Spent: ${total_spent}\nLast Purchase Date: {last_purchase_date}",
                           size=node_size, 
-                          color="#4274AA",
+                          color="#378DE9",
                           shape="dot"))
         
 
@@ -172,20 +173,14 @@ def behavioral_galaxy_3d(min_p=0.0, max_p=1.0):
         opacity= 1,
         hover_data=['customer_id', 'clv', 'probability_alive'],
         color_discrete_sequence=px.colors.qualitative.Bold,
-        template="plotly_dark" # Dark mode makes the 'galaxy' pop
+        template="plotly_dark" 
     )
     
-    # Adjusting the layout for a cleaner look
+
     fig.update_layout(margin=dict(l=0, r=0, b=0, t=0))
     st.plotly_chart(fig, use_container_width=True)
 
-    #     # Add this inside your function logic
-    # df_3d['Risk_Level'] = pd.cut(df_3d['probability_alive'], 
-    #                             bins=[0, 0.3, 0.7, 1.0], 
-    #                             labels=['High Risk', 'Neutral', 'Healthy'])
 
-    # # Then change the px.scatter_3d color parameter:
-    # color='Risk_Level'
 
 
 
@@ -228,7 +223,7 @@ def model_performance():
     st.dataframe(mi_df, use_container_width=True)
 
 def customer_tab(selected_id):
-    st.header("Customer Profile")
+    st.header("Customer Profiles")
     
 
     # Add a sort option, add last purchase date, add links to similar customers
@@ -262,7 +257,12 @@ def customer_tab(selected_id):
             #add a key, edge thickness, node size
             st.subheader("Purchase Network")
             show_agraph_network(selected_id)
+
+            st.markdown("About this graph:")
+            st.write("Product nodes are labeled by their StockCode. Node sizes are proportional to the business-wide importance of a product, and edge thickness is proportional to the number of times a selected customer purchased a specific item. Hover over product nodes for more purchase information")
     
+
+            
         #hover question marks things
         with right_col:
             st.subheader("Similar Customers")
@@ -282,6 +282,8 @@ def customer_tab(selected_id):
             if not recs.empty:
                 for i, row in recs.iterrows():
                     st.info(f"{row['Description']}")
+
+            
             
             
         st.divider()
@@ -294,7 +296,7 @@ def customer_tab(selected_id):
         
         st.divider()
 
-        st.subheader("Transaction History (Last 6 Months)")
+        st.subheader("Transaction History")
 
         query = f"""
             SELECT InvoiceDate, Description, Quantity, Price, Revenue 
@@ -306,7 +308,7 @@ def customer_tab(selected_id):
         history = duckdb.query(query).to_df()
 
         if (history.empty):
-            st.write("No transactions were made in the last 6 months.")
+            st.write("No transactions were made.")
         else:
             st.dataframe(history, use_container_width=True)
 
@@ -318,22 +320,25 @@ def business_tab():
     st.header("Business Overview")
 
 
-    g_stats = duckdb.query("SELECT * FROM 'global_stats.parquet'").df().iloc[0]
-    total_customers = duckdb.query("SELECT COUNT(*) as total_customers FROM 'customer_profiles.parquet'").df().iloc[0]['total_customers']
-    total_revenue = duckdb.query("SELECT SUM(clv) as total_revenue FROM 'customer_profiles.parquet'").df().iloc[0]['total_revenue']
+    # g_stats = duckdb.query("SELECT * FROM 'global_stats.parquet'").df().iloc[0]
+    # total_customers = duckdb.query("SELECT COUNT(*) as total_customers FROM 'customer_profiles.parquet'").df().iloc[0]['total_customers']
+    # total_revenue = duckdb.query("SELECT SUM(clv) as total_revenue FROM 'customer_profiles.parquet'").df().iloc[0]['total_revenue']
 
 
-    main_left, main_right = st.columns([1, 2])
+    # main_left, main_right = st.columns([1, 2])
 
-    with main_left:
+    # with main_left:
  
-        st.metric("Total Customer Count", f"{total_customers}")
-        st.metric("Total Predicted Revenue (6 Months)", f"${total_revenue:,.0f}")
-        st.metric("Average Predicted Customer Revenue", f"${g_stats['avg_clv']:,.0f}")
-        st.metric("Average Probability Alive", f"{g_stats['avg_prob_alive']:.2%}")
+    #     st.metric("Total Customer Count", f"{total_customers}")
+    #     st.metric("Total Predicted Revenue (6 Months)", f"${total_revenue:,.0f}")
+    #     st.metric("Average Predicted Customer Revenue", f"${g_stats['avg_clv']:,.0f}")
+    #     st.metric("Average Probability Alive", f"{g_stats['avg_prob_alive']:.2%}")
 
-    with main_right:
-        plot_pareto_curve()
+    # with main_right:
+    #     plot_pareto_curve()
+
+
+    st.image("clv.jpg")
 
     st.divider()
 
@@ -343,11 +348,11 @@ def business_tab():
 
 
     p_range = st.slider(
-        "Select P(Alive) Range",
+        "Select Probability Alive Range",
         0.0, 1.0, (0.0, 1.0), 0.05
     )
 
-    metrics_query = f"SELECT COUNT(*) as count, SUM(clv) as val FROM 'customer_profiles.parquet' WHERE probability_alive BETWEEN {p_range[0]} AND {p_range[1]}"
+    metrics_query = f"SELECT COUNT(*) as count, SUM(clv_last_6_months) as val FROM 'customer_profiles.parquet' WHERE probability_alive BETWEEN {p_range[0]} AND {p_range[1]}"
     stats = duckdb.query(metrics_query).to_df().iloc[0]
     
     col1, col2 = st.columns(2)
@@ -363,7 +368,7 @@ def methodology_tab():
 
     st.subheader("Data Source")
     st.write("""
-    The data used in this project was sourced from a UK-based company that sells giftware online, 
+    The data used in this project was sourced from a company that sells giftware online, 
     with a customer base of mainly wholesalers. The dataset is made up of all of the transactions 
     made between 01/12/2009 and 9/12/2011, with 1,067,371 rows of data containing information 
     such as the customer ID, invoice date, product ID, quantity purchased, and more. 
@@ -463,8 +468,8 @@ def methodology_tab():
 
 
 if __name__ == "__main__":
-    st.set_page_config(page_title="Retail Customer Explorer", layout="wide")
-    tab1, tab2, tab3 = st.tabs(["Customer Profile", "Business Overview", "Methodology"])
+    st.set_page_config(page_title="Retail Customer Explorer", layout="centered")
+    tab1, tab2, tab3 = st.tabs(["Customer Profiles", "Business Overview", "Methodology"])
 
     with tab1:
         customer_tab(selected_id)
